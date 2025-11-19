@@ -1,0 +1,5 @@
+Wind Turbine,Longitude [degrees],Latitude [degrees],Altitude [m],Hub Height [m],Timestamp [min],Mean Wind Speed [m/s],Air Density [kg/m**3],Energy Yield [MWh/a],Percentage losses [%],Full Load [h/a]
+WEA0,9.468773,53.115252,25,172,30,8.17,1.225,28314.24221,10.41,806
+WEA1,9.459934,53.115317,25,172,30,8.17,1.225,29567.01405,6.45,971
+WEA2,9.463604,53.112773,25,172,30,8.17,1.225,27936.954699999995,11.6,960
+WEA3,9.468993,53.11152,25,172,30,8.17,1.225,28221.831240000003,10.7,927

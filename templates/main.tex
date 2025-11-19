@@ -1,0 +1,122 @@
+\documentclass[a4paper,12pt,landscape]{article}
+\usepackage[landscape, left=0.5cm, right=0.5cm, top=3cm, bottom=1cm]{geometry}
+\usepackage{graphicx}  % For images
+\usepackage{booktabs}  % Professional table formatting
+\usepackage{xcolor}    % Colored text and tables
+\usepackage{fancyhdr}  % Custom headers and footers
+\usepackage{geometry}  % Page margins
+\usepackage{lmodern}   % Better fonts
+\usepackage{amsmath} 
+\usepackage{fontspec} 
+\usepackage{csvsimple}
+\usepackage{pgfplotstable} % For reading CSV files
+\usepackage{colortbl} % For table background colors
+\usepackage{array} % For better table formatting
+\usepackage{longtable}
+\usepackage{titling}
+\usepackage{mwe}
+\usepackage{hyperref}
+\usepackage{float}
+\usepackage[absolute,overlay]{textpos}
+\usepackage{rotating} % Add to preamble
+
+\setlength{\TPHorizModule}{1mm}
+\setlength{\TPVertModule}{1mm}
+\definecolor{tableblue}{RGB}{0, 32, 96} % Light blue for table rows
+
+\begin{document}
+
+\begin{textblock*}{8cm}(0.6\textwidth,1cm)
+    \includegraphics[width=8cm]{../../assets/images/naeco.png}
+\end{textblock*}
+
+
+
+\begin{longtable}[H]{|l|c|}
+    \hline
+    \rowcolor{tableblue} \color{white}\textbf{Description} & \color{white}\textbf{Value} \\
+    \hline
+    \csvreader[
+        separator=comma,
+        late after line=\\\hline,
+        no head
+    ]{../tables/wind_turbines_data_summary.csv}{}{\csvcoli & \csvcolii}
+    \hline
+\caption{Main results}
+\end{longtable}
+
+
+
+{\scriptsize
+\begin{longtable}{|l|c|c|c|c|c|c|c|c|c|}
+    \hline
+    \rowcolor{tableblue}
+    \color{white}\textbf{Wind Turbine} &
+    \color{white}\textbf{Longitude} &
+    \color{white}\textbf{Latitude} &
+    \color{white}\textbf{Altitude} &
+    \color{white}\textbf{Hub Height} &
+    \color{white}\textbf{Timestamp} &
+    \color{white}\textbf{Mean Wind Speed} &
+    \color{white}\textbf{Air Density} &
+    \color{white}\textbf{Full Load} \\
+    \hline
+
+    \csvreader[
+        separator=comma,
+        late after line=\\\hline,
+        no head
+    ]{../tables/wind_turbines_data2.csv}{}{
+    \csvcoli  & 
+    \csvcolii & 
+    \csvcoliii &
+    \csvcoliv &
+    \csvcolv &
+    \csvcolvi &
+    \csvcolvii &
+    \csvcolviii &
+    \csvcolix}
+    \hline
+\caption{Wind Turbine Dataset Summary}
+
+\end{longtable}
+}
+
+
+{\scriptsize
+\begin{longtable}{|l|c|c|c|c|c|c|c|c|c|}
+    \hline
+    \rowcolor{tableblue}
+    \color{white}\textbf{Wind Turbine} &
+    \color{white}\textbf{Park Yield} &
+    \color{white}\textbf{Noise} &
+    \color{white}\textbf{Shadow Loss} &
+    \color{white}\textbf{Radar} &
+    \color{white}\textbf{Bat Protection} &
+    \color{white}\textbf{Bird Protection} &
+    \color{white}\textbf{Total} &
+    \color{white}\textbf{Net Energy Yield} \\
+    \hline
+
+    \csvreader[
+        separator=comma,
+        late after line=\\\hline,
+        no head
+    ]{../tables/wind_turbines_data_info2.csv}{}{
+    \csvcoli  & 
+    \csvcolii & 
+    \csvcoliii &
+    \csvcoliv &
+    \csvcolv &
+    \csvcolvi &
+    \csvcolvii &
+    \csvcolviii &
+    \csvcolix}
+    \hline
+\caption{Wind Turbine Dataset Summary}
+
+\end{longtable}
+}
+
+
+\end{document}

@@ -1,0 +1,7 @@
+panda
+numpy
+matplotlib
+scipy
+py_wake
+seaborn
+windrose

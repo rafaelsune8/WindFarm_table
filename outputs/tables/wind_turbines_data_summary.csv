@@ -1,0 +1,14 @@
+Description,Value
+Wind turbine type,Enercon E-175 EP5 7 MW
+Park energy yield,126415.88 MWh/a
+Yield loss due to noise,0.000 MWh/a
+Yield loss due to shadow casting,12375.84 MWh/a
+Yield loss due to radar,0.000 MWh/a
+Yield loss due to sector management,0.000 MWh/a
+Yield loss due to bat protection,0.000 MWh/a
+Loss of yield due to bird protection,0.000 MWh/a
+Net energy yield,126415.88 MWh/a
+Other yield losses,0.000 MWh/a
+Real net energy yield,114040.04 MWh/a
+Total yield losses (excluding shading losses),9.79 %
+Relative reduction (excluding shading losses),0 %
