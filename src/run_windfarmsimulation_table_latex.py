@@ -21,6 +21,7 @@ from matplotlib.ticker import FormatStrFormatter
 import urllib.request as urllib
 from windrose import WindroseAxes
 import os
+import pvlib
 
 
 
@@ -506,12 +507,16 @@ def run_simulation(df, wf_model, hub_height, x_pos, y_pos, num_iterations):
     data = []
     wind_speed_data = pd.DataFrame()
     wind_direction_data = pd.DataFrame()
+    bats_mask_data = pd.DataFrame()
+    birds_mask_data = pd.DataFrame()
     
     for i in range(num_iterations):
         
         tmy_data = generate_TMY(df)
         ws = tmy_data[f'wind_speed_{hub_height}m'].values
         wd = tmy_data[f'wind_direction_{hub_height}m'].values
+        bats_mask = tmy_data[f'bats_mask'].values
+        birds_mask = tmy_data[f'birds_mask'].values
         time_stamp = np.arange(1, len(wd)+1)
         sim_res = wf_model(x_pos, y_pos, h=hub_height, wd=wd, ws=ws, time = time_stamp)
         power_wake = np.sum(sim_res.aep(with_wake_loss=True).values * 1e6)
@@ -519,12 +524,14 @@ def run_simulation(df, wf_model, hub_height, x_pos, y_pos, num_iterations):
         data.append([i, power_wake])
         wind_speed_data[f'{i}'] = ws
         wind_direction_data[f'{i}'] = wd
+        bats_mask_data[f'{i}'] = bats_mask
+        birds_mask_data[f'{i}'] = birds_mask
         
         data_df = pd.DataFrame(data = data, columns=['iteration', 'sum_power'])
 
 
         
-    return data_df, wind_speed_data, wind_direction_data
+    return data_df, wind_speed_data, wind_direction_data, bats_mask_data, birds_mask_data
 
 def save_results(data_df, filename_prefix):
     """Saves simulation results to CSV files."""
@@ -713,10 +720,12 @@ def percentiles_gen(df, wind_speed_df, wind_direction_df, wf_model, plantname, x
     
     return i_p50, i_p75, i_p90, df_sim_wake, df_percentiles
 
-def plots_wind_farm(i_p50, wind_speed_df, wind_direction_df, wf_model, wind_turbine, plantname, modelname, hub_height):
+def plots_wind_farm(i_p50, wind_speed_df, wind_direction_df, bats_mask_df,birds_mask_df, wf_model, wind_turbine, plantname, modelname, hub_height):
     
     ws = wind_speed_df[str(i_p50)]
     wd = wind_direction_df[str(i_p50)]
+    bats = bats_mask_df[str(i_p50)].values.astype(bool)
+    birds = birds_mask_df[str(i_p50)].values.astype(bool)
     time_stamp = np.arange(1, len(wd)+1)
     sim_res = wf_model(x_pos, y_pos, h=hub_height, wd=wd, ws=ws, time = time_stamp)
     
@@ -728,6 +737,16 @@ def plots_wind_farm(i_p50, wind_speed_df, wind_direction_df, wf_model, wind_turb
     
     
     aep_wt = sim_res.aep().sum(axis=1).values
+    wf_power = sim_res.aep().values
+    wf_power_bats = wf_power.copy()
+    wf_power_birds = wf_power.copy()
+    wf_power_bats[:, bats] = 0
+    wf_power_birds[:, birds] = 0
+    aep_wt_gwh = np.round(aep_wt * 1e6, 2)
+
+    diff_bats = np.round((aep_wt - wf_power_bats.sum(axis=1)) * 1e6, 2)
+    diff_birds = np.round((aep_wt - wf_power_birds.sum(axis=1)) * 1e6, 2)
+    
     plt.figure(figsize=(12,8))
     plt.title(f"WP-{plantname} Annual Energy Production (AEP) with Wake Effect")
     #aep = sim_res.aep()
@@ -781,535 +800,13 @@ def plots_wind_farm(i_p50, wind_speed_df, wind_direction_df, wf_model, wind_turb
         
         df_aep.to_csv(os.path.join(TABLES_DIR, f"{plantname}_{modelname}_{hub_height}_aep_table.csv"))
     
-    return df_aep
-    
-
-def plot_resampled_power(df, plantname, modelname, hub_height):
-    """
-    Plot resampled power of plant.
-    
-    Resample the plant power on daily, weekly,
-    monthly and yearly basis by taking sum.
-    Then plot all resampled data in one plot.
-    
-    TODO:Production column Or column to plot
-    should be renamed as "power" in dataframe
-
-    Parameters
-    ----------
-    data : DataFrame
-            Plant production data.
-    unit : str
-        Actual unit of power in format [<unit>]
-        e.g. [kW], [MW], [kWh], [MWh]
-
-    Returns
-    -------
-    None.
-
-    """
-    data = df.copy()
-    data["Day of year"] = data["timestamp"].dt.dayofyear
-
-    plt.figure(figsize=(12,8))
-    plt.title(f"WP-{plantname} hourly power behavior")
-    plt.plot(data["Day of year"].to_numpy(), data["Total"].to_numpy())
-    plt.xlabel("Day of the year")
-    plt.ylabel("Power (kWh)")
-    plt.savefig(os.path.join(FIGURES_DIR, f"WP_{plantname}_yearly_production_timeseries_{modelname}_{hub_height}.png"))
-    plt.show()
-    
-    
-    
-    data = df.copy()
-    data.rename(columns = {"Total":"power"}, inplace = True)
-    
-    data.set_index('timestamp', inplace=True)
-    # fig = plt.figure(figsize=(18,16))
-    # fig.subplots_adjust(hspace=.4)
-    # ax1 = fig.add_subplot(5,1,1)
-    
-    daily = data['power'].resample('D').sum().to_frame()
-    daily.reset_index(inplace=True)
-    daily["Day of year"] = daily["timestamp"].dt.dayofyear
-    daily["year"] = daily["timestamp"].dt.strftime('-%y')
-    daily["Day of year"] = daily["Day of year"].astype(str)+daily["year"].astype(str)
-    # ax1.set_title('Sum of estimated power resampled over day',size=15)
-    # sns.barplot(x=daily["Day of year"], y=daily["power"], data=daily, ax=ax1)
-    # ax1.set_ylabel("Power ")
-    # plt.gca().yaxis.set_major_formatter(
-    #     FormatStrFormatter("%d")
-    #     )
-    # plt.gca().xaxis.set_major_formatter(
-    #     FormatStrFormatter("")
-    #     )
-    
-    # ax2 = fig.add_subplot(5,1,2)
-    weekly = data['power'].resample('W').sum().to_frame()
-    weekly.reset_index(inplace=True)
-    weekly["Week of year"] = weekly["timestamp"].dt.strftime('%U')
-    # ax2.set_title('Sum of estimated power resampled over week',size=15)
-    # sns.barplot(x=weekly["Week of year"], y=weekly["power"], data=weekly, ax=ax2)
-    # ax2.set( ylabel="Power [kWh]")
-    # plt.gca().yaxis.set_major_formatter(
-    #     FormatStrFormatter("%d")
-    #     )
-    
-    # ax3 = fig.add_subplot(5,1,3)
-    monthly = data['power'].resample('M').sum().to_frame()
-    monthly.reset_index(inplace=True)
-    monthly["Month"] = monthly["timestamp"].apply(lambda x: x.strftime('%b'))    
-    # ax3.set_title('Sum of estimated power resampled over month',size=15)
-    # sns.barplot(x=monthly["Month"], y=monthly["power"], data=monthly, ax=ax3)
-    # ax3.set_ylabel("Power [kWh]")
-    # plt.gca().yaxis.set_major_formatter(
-    #     FormatStrFormatter("%d")
-    #     )
-    
-    # ax4  = fig.add_subplot(5,1,4)
-    # ax4.set_title('Sum of estimated power resampled over quarter',size=15)
-    quarterly = data['power'].resample('Q').sum().to_frame()
-    quarterly.reset_index(inplace=True)
-    quarterly["Quarter of year"] = quarterly["timestamp"].dt.to_period('Q')
-    #If to remove year from column
-    quarterly["Quarter of year"] = quarterly["Quarter of year"].apply(lambda x: x.strftime('Q%q'))     
-    # sns.barplot(x=quarterly["Quarter of year"], y=quarterly["power"], data=quarterly, ax=ax4)
-    # ax4.set_ylabel("Power [kWh]")
-    # plt.gca().yaxis.set_major_formatter(
-    #     FormatStrFormatter("%d")
-    #     )
-    
-    
-    # ax5  = fig.add_subplot(5,1,5)
-    yearly = data['power'].resample('A').sum().to_frame()
-    yearly.reset_index(inplace=True)
-    yearly["Year"] = yearly["timestamp"].dt.year
-    # #If to remove year from column
-    yearly["Year"] = yearly["timestamp"].apply(lambda x: x.strftime(''))    
-    # ax5.set_title('Sum of estimated power resampled over year',size=15)
-    # sns.barplot(x=yearly["Year"], y=yearly["power"], data=yearly, ax=ax5)
-    # # yearly[["Year","power"]].plot(ax=ax5, kind='bar')
-    # ax5.set_ylabel("Power [kWh]")
-    # plt.gca().yaxis.set_major_formatter(
-    #     FormatStrFormatter("%d")
-    #     )
-    # fig.suptitle(plantname+" resampled power",
-    #              size=20)
-    
-    
-    fig = plt.figure(figsize=(18,16))
-    fig.subplots_adjust(hspace=.4)
-    
-    ax3 = fig.add_subplot(3,1,1)    
-    ax3.set_title('Sum of estimated power resampled over month',size=15)
-    sns.barplot(x=monthly["Month"], y=monthly["power"], data=monthly, ax=ax3)
-    ax3.set_ylabel("Power [kWh]")
-    plt.gca().yaxis.set_major_formatter(
-        FormatStrFormatter("%d")
-        )
-    
-    ax4  = fig.add_subplot(3,1,2)
-    ax4.set_title('Sum of estimated power resampled over quarter',size=15)
-    sns.barplot(x=quarterly["Quarter of year"], y=quarterly["power"], data=quarterly, ax=ax4)
-    ax4.set_ylabel("Power [kWh]")
-    plt.gca().yaxis.set_major_formatter(
-        FormatStrFormatter("%d")
-        )
-    
-    ax5  = fig.add_subplot(3,1,3)
-    ax5.set_title('Sum of estimated power resampled over year',size=15)
-    sns.barplot(x=yearly["Year"], y=yearly["power"], data=yearly, ax=ax5)
-    # yearly[["Year","power"]].plot(ax=ax5, kind='bar')
-    ax5.set_ylabel("Power [kWh]")
-    plt.gca().yaxis.set_major_formatter(
-        FormatStrFormatter("%d")
-        )
-    fig.suptitle(plantname+" resampled power",
-                 size=20)
-    
-    data.reset_index(inplace=True)
-    plt.savefig(os.path.join(FIGURES_DIR, f"WP_{plantname}_{modelname}_monthly_quarterly_yearly_{hub_height}.png"))
-    plt.show()
-    
-    # Plot pie graph of resampled production
-    monthly_pie  = monthly[["Month", "power"]]
-    monthly_pie.set_index("Month", inplace=True)
-    monthly_pie.plot(kind='pie', subplots=True, autopct='%1.1f%%', figsize=(8, 8))
-    plt.title('Monthly contribution of estimated power')
-    plt.ylabel("Power [kWh]")
-    plt.savefig(os.path.join(FIGURES_DIR, f"WP_{plantname}_{modelname}_monthly_pie_{hub_height}.png"))
-    plt.show()
-    monthly_pie.reset_index(inplace=True)
-    
-    # Plot pie graph of resampled production
-    quarterly_pie  = quarterly[["Quarter of year", "power"]]
-    quarterly_pie.set_index("Quarter of year", inplace=True)
-    quarterly_pie.plot(kind='pie', subplots=True, autopct='%1.1f%%', figsize=(8, 8))
-    plt.title('Quarterly contribution of estimated power')
-    plt.ylabel("Power [kWh]")
-    plt.savefig(os.path.join(FIGURES_DIR, f"WP_{plantname}_{modelname}_quarterly_pie_{hub_height}.png"))
-    plt.show()
-    quarterly_pie.reset_index(inplace=True)
+    return df_aep, diff_bats, diff_birds, bats, wf_power_bats
+    #return df_aep, bats, wf_power_bats
     
 
 
-    return daily,weekly,monthly,quarterly,yearly
-
-def plot_power_curve(data, unit, plantname, hub_height, modelname):
-    """
-    Plot theoretcial curve with actual produced power against windspeed.
-
-    Parameters
-    ----------
-    data : DataFrame
-        Original data.
-    info : dict
-        Plant information.
-    data_type : str, optional
-        Sometimes different data to plot. The default is " ".
-    hubHeight : str, optional
-        Use windspeed at what height. The default is "100m".
-    turbine : str, optional
-        Turbine type. The default is " ".
-
-    Returns
-    -------
-    None.
-
-    """
-    fig, ax = plt.subplots(figsize=(10, 6))  # Better control over figure size
-    scatter = ax.scatter(
-        data["wind_speed"].to_numpy(), 
-        data["WEA0"].to_numpy(),
-    )
-    
-    # Labels and title
-    ax.set_xlabel("Wind speed [m/s]", fontsize=12)
-    ax.set_ylabel(f"Power {unit}", fontsize=12)
-    ax.set_title(f"{plantname} WEA0 Power Curve", fontsize=14, pad=20)
-    plt.savefig(os.path.join(FIGURES_DIR, f"Power_curve_{plantname}_{modelname}_{hub_height}.png"))
-    plt.show()  
-    
-    data["Day of year"] = data["timestamp"].dt.dayofyear
-    plt.figure(figsize=(12,8))
-    plt.title(f"WP-{plantname} WEA0 hourly power behavior")
-    plt.plot(data["Day of year"].to_numpy(), data["WEA0"].to_numpy())
-    plt.xlabel("Day of the year")
-    plt.ylabel("Power (kWh)")
-    plt.savefig(os.path.join(FIGURES_DIR, f"WP_{plantname}_WEA0_yearly_production_timeseries_{modelname}_{hub_height}.png"))
-    plt.show()
 
 
-# def build_final_csv(monthly, quarterly, df_percentiles, plantname, modelname):
-#     """
-#     Merges monthly, quarterly, and percentile data into a structured CSV file for Word formatting.
-    
-#     - `monthly`: DataFrame with 'Month' and 'power' columns.
-#     - `quarterly`: DataFrame with 'Quarter of year' and 'power' columns.
-#     - `df_percentiles`: DataFrame with yearly P50, P75, P90 values.
-#     - `output_filename`: Name of the output CSV file.
-#     """
-
-#     # # Prepare Monthly Data
-#     # monthly = data[['power']].resample('M').sum().to_frame()
-#     # monthly.reset_index(inplace=True)
-#     monthly["Month"] = monthly["timestamp"].apply(lambda x: x.strftime('%b'))  
-#     monthly_table = monthly[['Month', 'power']].rename(columns={'power': 'Sum of estimated power plant [kWh]'})
-    
-#     # Prepare Quarterly Data
-#     quarterly_table = quarterly[['Quarter of year', 'power']].rename(columns={'power': 'Sum of estimated power plant [kWh]', 'Quarter of year':'Month'})
-    
-#     yearly_table_name = pd.DataFrame({
-#         'Month': 'Yearly',
-#         'Sum of estimated power plant [kWh]': ['']
-#     }) 
-#     # Prepare Yearly Percentile Data
-#     yearly_table = pd.DataFrame({
-#         'Month': ['P50', 'P75', 'P90'],
-#         'Sum of estimated power plant [kWh]': df_percentiles['power'].round(2).values
-#     })
-
-#     # Combine DataFrames with Spacing for Readability
-#     spacer = pd.DataFrame({'Month': [''], 'Sum of estimated power plant [kWh]': ['']})  # Empty row for spacing
-#     combined = pd.concat([
-#         monthly_table, spacer, quarterly_table, yearly_table_name, yearly_table
-#     ], ignore_index=True)
-
-#     # Save the Final CSV
-#     combined.to_csv(os.path.join(TABLES_DIR, f"{plantname}_{modelname}_montly_quarterly_yearly_table.csv", index=False)
-
-
-def summary_table(df_percentiles, plantname, modelname,wind_turbine_name, hub_height):
-    # Ensure wind_turbine_name is a string and not a tuple
-    if isinstance(wind_turbine_name, tuple):
-        wind_turbine_name = wind_turbine_name[0]  # Extract string if inside a tuple
-    
-    print("Debug - df_percentiles['power'] structure:")
-    print(df_percentiles['power'].iloc[0])  # Check if it's a list, array, or scalar
-    print(type(df_percentiles['power'].iloc[0]))
-    
-    
-
-    df_summary = pd.DataFrame({
-        "Turbine Type": [f"P50 {wind_turbine_name}", f"P75 {wind_turbine_name}", f"P90 {wind_turbine_name}"],
-        "Yearly estimated energy production [kWh]": [
-            f"{df_percentiles['power'].iloc[0].round(2)}",
-            f"{df_percentiles['power'].iloc[1].round(2)}",
-            f"{df_percentiles['power'].iloc[2].round(2)}"
-        ],
-        "Hub height [m]": [hub_height, hub_height, hub_height]
-    })
-
-    # Create a clean filename by removing unwanted characters
-    safe_wind_turbine_name = str(wind_turbine_name).replace(" ", "_").replace(",", "")
-    filename = f"WP_{plantname}_{modelname}_summary_table.csv"
-    
-    print(os.path.join(TABLES_DIR, filename))
-    
-    df_summary.to_csv(os.path.join(TABLES_DIR, filename), index=False)
-    print(f"Saved CSV as: {filename}")
-
-def build_final_csv(df_sim, df_percentiles , plantname, modelname, hub_height):
-    """
-    Merges monthly, quarterly, and percentile data into a structured CSV file for Word formatting.
-    
-    - `monthly`: DataFrame with 'Month' and 'power' columns.
-    - `quarterly`: DataFrame with 'Quarter of year' and 'power' columns.
-    - `df_percentiles`: DataFrame with yearly P50, P75, P90 values.
-    - `output_filename`: Name of the output CSV file.
-    """
-
-    # Prepare Monthly Data
-    data = df_sim.copy()
-    data.rename(columns = {"Total":"power"}, inplace = True)
-    
-    data.set_index('timestamp', inplace=True)
-    
-    monthly = data.resample('M').sum()
-    monthly.reset_index(inplace=True)
-    monthly["Month"] = monthly["timestamp"].apply(lambda x: x.strftime('%b'))  
-    monthly_table = monthly[['Month', 'power', 'WEA0', 'WEA1', 'WEA2']].rename(columns={'power': 'Sum of estimated power plant [kWh]', 
-                                                                                        'WEA0' : 'Sum of estimated WEA0 [kWh]',
-                                                                                        'WEA1' : 'Sum of estimated WEA1 [kWh]',
-                                                                                        'WEA2' : 'Sum of estimated WEA2 [kWh]',})
-    
-    quarterly_table_name = pd.DataFrame({
-        'Month': 'Quarterly',
-        'Sum of estimated power plant [kWh]': [''],
-        'Sum of estimated WEA0 [kWh]': [''],
-        'Sum of estimated WEA1 [kWh]': [''],
-        'Sum of estimated WEA2 [kWh]': [''],
-    })
-    # Prepare Quarterly Data
-    quarterly = data.resample('Q').sum()
-    quarterly.reset_index(inplace=True)
-    quarterly["Quarter of year"] = quarterly["timestamp"].dt.to_period('Q')
-    quarterly["Quarter of year"] = ["Q1", "Q2", "Q3", "Q4"]
-    quarterly_table = quarterly[['Quarter of year', 'power', 'WEA0', 'WEA1', 'WEA2']].rename(columns={'power': 'Sum of estimated power plant [kWh]', 'Quarter of year':'Month',
-                                                                                                      'WEA0' : 'Sum of estimated WEA0 [kWh]',
-                                                                                                      'WEA1' : 'Sum of estimated WEA1 [kWh]',
-                                                                                                      'WEA2' : 'Sum of estimated WEA2 [kWh]',})
-    yearly_table_name = pd.DataFrame({
-        'Month': 'Yearly',
-        'Sum of estimated power plant [kWh]': [''],
-        'Sum of estimated WEA0 [kWh]': [''],
-        'Sum of estimated WEA1 [kWh]': [''],
-        'Sum of estimated WEA2 [kWh]': [''],
-    }) 
-    
-    
-    
-    
-    # Prepare Yearly Percentile Data
-    # yearly_table = pd.DataFrame({
-    #     'Month': ['P50', 'P75', 'P90'],
-    #     'Sum of estimated power plant [kWh]': df_percentiles['power'],
-    #     'Sum of estimated WEA0 [kWh]': df_percentiles['WEA0'],
-    #     'Sum of estimated WEA1 [kWh]': df_percentiles['WEA1'],
-    #     'Sum of estimated WEA2 [kWh]': df_percentiles['WEA2']
-    # })
-    
-    
-    def extract_value(val):
-        if isinstance(val, list):
-            return float(val[0]) if len(val) > 0 else 0.0
-        elif isinstance(val, str) and val.startswith('[') and val.endswith(']'):
-            return float(val[1:-1])
-        return float(val)
-    
-    # Prepare Yearly Percentile Data with cleaned values
-    yearly_table = pd.DataFrame({
-        'Month': ['P50', 'P75', 'P90'],
-        'Sum of estimated power plant [kWh]': [extract_value(x) for x in df_percentiles['power']],
-        'Sum of estimated WEA0 [kWh]': [extract_value(x) for x in df_percentiles['WEA0']],
-        'Sum of estimated WEA1 [kWh]': [extract_value(x) for x in df_percentiles['WEA1']],
-        'Sum of estimated WEA2 [kWh]': [extract_value(x) for x in df_percentiles['WEA2']]
-    })
-
-    # Combine DataFrames with Spacing for Readability
-    spacer = pd.DataFrame({'Month': [''], 'Sum of estimated power plant [kWh]': [''],
-                           'Sum of estimated WEA0 [kWh]': [''],
-                           'Sum of estimated WEA1 [kWh]': [''],
-                           'Sum of estimated WEA2 [kWh]': ['']})  # Empty row for spacing
-    combined = pd.concat([
-        monthly_table, quarterly_table_name, quarterly_table, yearly_table_name, yearly_table
-    ], ignore_index=True)
-
-    # Save the Final CSV
-    combined.to_csv(os.path.join(TABLES_DIR, f"{plantname}_{modelname}_monthly_quarterly_yearly_table_{hub_height}.csv"), index=False)
-
-
-def build_final_csv_gen(df_sim, df_percentiles , plantname, modelname, hub_height):
-    """
-    Merges monthly, quarterly, and percentile data into a structured CSV file for Word formatting.
-    
-    - `monthly`: DataFrame with 'Month' and 'power' columns.
-    - `quarterly`: DataFrame with 'Quarter of year' and 'power' columns.
-    - `df_percentiles`: DataFrame with yearly P50, P75, P90 values.
-    - `output_filename`: Name of the output CSV file.
-    """
-
-    # Identify turbine columns (all columns starting with 'WEA')
-    turbine_cols = [col for col in df_sim.columns if col.startswith('WEA')]
-    num_turbines = len(turbine_cols)
-    
-    # Prepare column renaming mappings
-    rename_map = {'power': 'Sum of estimated power plant [kWh]'}
-    for i in range(num_turbines):
-        rename_map[f'WEA{i}'] = f'Sum of estimated WEA{i} [kWh]'
-    
-    # Prepare Monthly Data
-    data = df_sim.copy()
-    if 'Total' in data.columns:
-        data.rename(columns={'Total': 'power'}, inplace=True)
-    data.set_index('timestamp', inplace=True)
-    
-    # Monthly aggregation
-    monthly = data.resample('M').sum()
-    monthly.reset_index(inplace=True)
-    monthly["Month"] = monthly["timestamp"].apply(lambda x: x.strftime('%b'))
-    
-    # Select and rename columns
-    monthly_cols = ['Month', 'power'] + turbine_cols
-    monthly_table = monthly[monthly_cols].rename(columns=rename_map)
-    
-    # Quarterly table header - create with correct number of rows
-    quarterly_table_name = pd.DataFrame({
-        'Month': ['Quarterly'],
-        'Sum of estimated power plant [kWh]': ['']
-    })
-    # Add turbine columns
-    for i in range(num_turbines):
-        quarterly_table_name[f'Sum of estimated WEA{i} [kWh]'] = ['']
-    
-    # Quarterly aggregation
-    quarterly = data.resample('Q').sum()
-    quarterly.reset_index(inplace=True)
-    quarterly["Quarter of year"] = quarterly["timestamp"].dt.to_period('Q')
-    quarterly["Quarter of year"] = ["Q1", "Q2", "Q3", "Q4"]
-    
-    # Select and rename columns
-    quarterly_cols = ['Quarter of year', 'power'] + turbine_cols
-    quarterly_table = quarterly[quarterly_cols].rename(columns={
-        **rename_map,
-        'Quarter of year': 'Month'
-    })
-    
-    # Yearly table header
-    yearly_table_name = pd.DataFrame({
-        'Month': ['Yearly'],
-        'Sum of estimated power plant [kWh]': ['']
-    })
-    # Add turbine columns
-    for i in range(num_turbines):
-        yearly_table_name[f'Sum of estimated WEA{i} [kWh]'] = ['']
-    
-    # Prepare Yearly Percentile Data
-    def extract_value(val):
-        if isinstance(val, list):
-            return float(val[0]) if len(val) > 0 else 0.0
-        elif isinstance(val, str) and val.startswith('[') and val.endswith(']'):
-            return float(val[1:-1])
-        return float(val)
-    
-    # Build yearly table data
-    yearly_data = {
-        'Month': ['P50', 'P75', 'P90'],
-        'Sum of estimated power plant [kWh]': [
-            extract_value(x) for x in df_percentiles['power']
-        ]
-    }
-    
-    for i in range(num_turbines):
-        yearly_data[f'Sum of estimated WEA{i} [kWh]'] = [
-            extract_value(x) for x in df_percentiles[f'WEA{i}']
-        ]
-    
-    yearly_table = pd.DataFrame(yearly_data)
-    
-    # Create spacer row with correct columns
-    spacer_data = {'Month': ['']}
-    for col in rename_map.values():
-        spacer_data[col] = ['']
-    spacer = pd.DataFrame(spacer_data)
-    
-    # Combine all sections
-    combined = pd.concat([
-        monthly_table,
-        spacer,
-        quarterly_table_name,
-        quarterly_table,
-        yearly_table_name,
-        yearly_table
-    ], ignore_index=True)
-
-    # Save the Final CSV
-    combined.to_csv(os.path.join(TABLES_DIR, f"{plantname}_{modelname}_monthly_quarterly_yearly_table_{hub_height}.csv"), index=False)
-    
-    if num_turbines >= 5:
-        
-        combined.iloc[:,:5].to_csv(os.path.join(TABLES_DIR, f"{plantname}_{modelname}_monthly_quarterly_yearly_table_{hub_height}.csv"), index=False)
-        combined.iloc[:,:].to_csv(os.path.join(TABLES_DIR, f"{plantname}_{modelname}_monthly_quarterly_yearly_table_all_{hub_height}.csv"), index=False)
-    else:
-        
-        combined.to_csv(os.path.join(TABLES_DIR, f"{plantname}_{modelname}_monthly_quarterly_yearly_table_{hub_height}.csv"), index=False)
-
-
-def summary_table(df_percentiles, plantname, modelname,wind_turbine_name, hub_height):
-    # Ensure wind_turbine_name is a string and not a tuple
-    if isinstance(wind_turbine_name, tuple):
-        wind_turbine_name = wind_turbine_name[0]  # Extract string if inside a tuple
-        
-    print("Debug - df_percentiles['power'] structure:")
-    print(df_percentiles['power'].iloc[0])  # Check if it's a list, array, or scalar
-    print(type(df_percentiles['power'].iloc[0]))
-    
-    df_percentiles['power'] = df_percentiles['power'].apply(lambda x: float(x[0]) if isinstance(x, (list, np.ndarray)) else float(x))
-
-    df_summary = pd.DataFrame({
-        "Turbine Type": [f"P50 {wind_turbine_name}", f"P75 {wind_turbine_name}", f"P90 {wind_turbine_name}"],
-        "Yearly estimated energy production [kWh]": [
-            f"{df_percentiles['power'].iloc[0]}",
-            f"{df_percentiles['power'].iloc[1]}",
-            f"{df_percentiles['power'].iloc[2]}"
-        ],
-        "Hub height [m]": [hub_height, hub_height, hub_height]
-    })
-
-    # Create a clean filename by removing unwanted characters
-    safe_wind_turbine_name = str(wind_turbine_name).replace(" ", "_").replace(",", "")
-    filename = f"WP_{plantname}_{modelname}_summary_table_{hub_height}.csv"
-    
-    print(os.path.join(TABLES_DIR, filename))
-    
-    df_summary.to_csv(os.path.join(TABLES_DIR, filename), index=False)
-    print(f"Saved CSV as: {filename}")
-    
-    p50 = df_percentiles['power'].iloc[0]
-    p75 = df_percentiles['power'].iloc[1]
-    p90 = df_percentiles['power'].iloc[2]
-    
-    #return(f"{p50/1000000:.2f}", f"{p75/1000000:.2f}", f"{p90/1000000:.2f}")
 
 
 def generate_map_yandex(locationname, x_coord, y_coord):
@@ -1354,6 +851,99 @@ df = pd.read_csv(f"../data/{filename}.csv")
 df['timestamp'] = pd.to_datetime(df['time'])
 
 
+
+df = df.fillna(method='ffill').fillna(method='bfill')
+
+
+
+
+
+def add_solar_position(df, latitude, longitude):
+    """
+    Adds solar zenith and azimuth to the dataframe.
+    Requires df['timestamp'].
+    """
+    solar = pvlib.solarposition.get_solarposition(
+        time=df["timestamp"],
+        latitude=latitude,
+        longitude=longitude
+    )
+    
+    df["solar_zenith"] = solar["zenith"].values
+    df["solar_azimuth"] = solar["azimuth"].values
+    return df
+
+
+
+def is_in_shutdown_period(series_timestamp):
+    """
+    Vectorized check whether date is in shutdown period:
+    Between April 1 and October 15 (inclusive)
+    """
+    year = series_timestamp.dt.year
+    start = pd.to_datetime(year.astype(str) + "-04-01")
+    end   = pd.to_datetime(year.astype(str) + "-10-15")
+    return (series_timestamp >= start) & (series_timestamp <= end)
+
+
+def bats_mask(df, temperature_thr=283.15, wind_thr=7.9, precip_thr=0.6):
+    """
+    Creates a mask for bat curtailment conditions.
+    df must contain:
+      timestamp, solar_zenith, wind_speed_175m, temperature_175m, precipitation
+    """
+    shutdown = is_in_shutdown_period(df["timestamp"])
+    night = df["solar_zenith"] >= 90
+    wind_ok = df["wind_speed_175m"] <= wind_thr
+    temp_ok = df["temperature_175m"] >= temperature_thr
+    rain_ok = df["precipitation"] <= precip_thr
+
+    mask = shutdown & night & wind_ok & temp_ok & rain_ok
+    return mask.astype(int)
+
+def birds_mask(df,
+               migration_start="03-01",
+               migration_end="05-31",
+               wind_thr=12, 
+               visibility_thr=2000,
+               precipitation_thr=3):
+    """
+    Creates a mask for bird curtailment periods.
+    
+    Parameters can be customized:
+      migration_start : str ("MM-DD")
+      migration_end   : str ("MM-DD")
+      wind_thr        : max wind speed for birds to be active
+      visibility_thr  : min visibility (m)
+      precipitation_thr: max precipitation
+      
+    df must contain:
+      timestamp, wind_speed_175m, visibility, precipitation, (optionally solar_zenith)
+    """
+
+    year = df.timestamp.dt.year
+    start = pd.to_datetime(year.astype(str) + "-" + migration_start)
+    end   = pd.to_datetime(year.astype(str) + "-" + migration_end)
+    period = (df.timestamp >= start) & (df.timestamp <= end)
+
+    wind_ok = df["wind_speed_175m"] <= wind_thr
+    #vis_ok = df["visibility"] >= visibility_thr
+    rain_ok = df["precipitation"] <= precipitation_thr
+
+    mask = period & wind_ok & rain_ok
+
+    return mask.astype(int)
+
+
+latitude = np.mean(y_coord)
+longitude = np.mean(x_coord)
+
+df = add_solar_position(df, latitude, longitude)
+df["bats_mask"] = bats_mask(df)
+df["birds_mask"] = birds_mask(df)
+
+
+
         
 
 turbine_data = read_turbine_model(json_file, modelname)
@@ -1369,12 +959,13 @@ if turbine_data:
     #correlation_heatmap(df, hub_height, plantname)
     #weibull_distribution_sections(df, hub_height, plantname)
     wf_model, x_pos, y_pos, wind_turbine = setup_wind_farm(df, turbine_data, modelname, hub_height, x_pos, y_pos, plantname)
-    data_df, wind_speed_df, wind_direction_df = run_simulation(df, wf_model, hub_height, x_pos, y_pos, num_iterations)
+    data_df, wind_speed_df, wind_direction_df, bats_mask_df, birds_mask_df = run_simulation(df, wf_model, hub_height, x_pos, y_pos, num_iterations)
     # #save_results(data_df, f"{plantname}_{modelname}_{hub_height}")
     p10, p50, p75, p90 = plot_percentiles(data_df, plantname)
     # #i_p50, i_p75, i_p90, df_sim_wake, df_percentiles, df_percentiles_WEA0, df_percentiles_WEA1, df_percentiles_WEA2 = percentiles(data_df, wind_speed_df, wind_direction_df, wf_model, plantname)
     i_p50, i_p75, i_p90, df_sim_wake, df_percentiles = percentiles_gen(data_df, wind_speed_df, wind_direction_df, wf_model, plantname, x_pos, y_pos, hub_height)
-    df_wake = plots_wind_farm(i_p50, wind_speed_df, wind_direction_df, wf_model, wind_turbine, plantname, modelname, hub_height)
+    df_wake, diff_bats, diff_birds, bats, wf_power_bats = plots_wind_farm(i_p50, wind_speed_df, wind_direction_df, bats_mask_df,birds_mask_df, wf_model, wind_turbine, plantname, modelname, hub_height)
+    #df_wake, bats, wf_power_bats = plots_wind_farm(i_p50, wind_speed_df, wind_direction_df, bats_mask_df,birds_mask_df, wf_model, wind_turbine, plantname, modelname, hub_height)
     # daily,weekly,monthly,quarterly,yearly =  plot_resampled_power(df_sim_wake, plantname, modelname, hub_height)
     # plot_power_curve(df_sim_wake, "kWh", plantname, hub_height, modelname)
     # #build_final_csv(monthly, quarterly, df_percentiles, plantname, modelname)
@@ -1453,10 +1044,12 @@ yield_energy = [df_wake[f"WEA{i}"].iloc[0]/1000 for i in range(len(x_pos))]
 wind_turbine_df["[MWh/a]"] = yield_energy
 wind_turbine_df["1[MWh/a]"] = 0
 shadow_energy = [df_wake[f"WEA{i}"].iloc[0]/1000 - df_wake[f"WEA{i}"].iloc[1]/1000 for i in range(len(x_pos))]
+bats_energy = [diff_bats[i]/1000  for i in range(len(x_pos))]
+birds_energy = [diff_birds[i]/1000  for i in range(len(x_pos))]
 wind_turbine_df["2[MWh/a]"] = shadow_energy
 wind_turbine_df["3[MWh/a]"] = 0
-wind_turbine_df["4[MWh/a]"] = 0
-wind_turbine_df["5[MWh/a]"] = 0
+wind_turbine_df["4[MWh/a]"] = bats_energy
+wind_turbine_df["5[MWh/a]"] = birds_energy
 percentage_energy = [df_wake[f"WEA{i}"].iloc[2] for i in range(len(x_pos))]
 wind_turbine_df["[%]"] = percentage_energy
 net_energy = [df_wake[f"WEA{i}"].iloc[1] for i in range(len(x_pos))]
